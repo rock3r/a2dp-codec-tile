@@ -70,6 +70,11 @@ final class CodecAccess implements BluetoothProfile.ServiceListener {
             }
             a2dp = (BluetoothA2dp) proxy;
             try {
+                if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    error("Grant Bluetooth permission", null);
+                    return;
+                }
                 List<BluetoothDevice> connected = a2dp.getConnectedDevices();
                 if (connected.isEmpty()) {
                     error(NO_A2DP_DEVICE, null);
@@ -100,13 +105,16 @@ final class CodecAccess implements BluetoothProfile.ServiceListener {
     }
 
     String deviceName() {
-        if (device == null) return null;
+        if (device == null || context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) return "Bluetooth headphones";
         String name = device.getName();
         return name == null || name.isBlank() ? "Bluetooth headphones" : name;
     }
 
     String deviceAddress() {
-        return device == null ? null : device.getAddress();
+        if (device == null || context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) return null;
+        return device.getAddress();
     }
 
     private BluetoothDevice activeDevice(List<BluetoothDevice> connected) {

@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.sebastiano.a2dpcodec">
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
     <application android:label="A2DP Codec Tile">
         <activity
             android:name=".CodecPickerActivity"

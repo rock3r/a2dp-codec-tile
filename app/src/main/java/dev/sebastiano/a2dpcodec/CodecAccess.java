@@ -22,6 +22,7 @@ final class CodecAccess implements BluetoothProfile.ServiceListener {
     static final String BLUETOOTH_OFF = "Bluetooth is off";
     static final String NO_A2DP_DEVICE = "No A2DP device connected";
     static final String A2DP_DISCONNECTED = "A2DP disconnected";
+    static final String MULTIPLE_A2DP_DEVICES = "Select an active Bluetooth audio output";
 
     interface Callback {
         void onReady(CodecAccess access);
@@ -72,11 +73,13 @@ final class CodecAccess implements BluetoothProfile.ServiceListener {
                 List<BluetoothDevice> connected = a2dp.getConnectedDevices();
                 if (connected.isEmpty()) {
                     error(NO_A2DP_DEVICE, null);
-                } else if (connected.size() > 1) {
-                    error("Multiple A2DP outputs connected", null);
                 } else {
-                    device = connected.get(0);
-                    callback.onReady(this);
+                    device = activeDevice(connected);
+                    if (device == null) {
+                        error(MULTIPLE_A2DP_DEVICES, null);
+                    } else {
+                        callback.onReady(this);
+                    }
                 }
             } catch (Throwable failure) {
                 error("Could not read headphones", failure);
@@ -94,6 +97,28 @@ final class CodecAccess implements BluetoothProfile.ServiceListener {
     BluetoothCodecStatus status() throws Exception {
         Method method = BluetoothA2dp.class.getMethod("getCodecStatus", BluetoothDevice.class);
         return (BluetoothCodecStatus) invoke(method, device);
+    }
+
+    String deviceName() {
+        if (device == null) return null;
+        String name = device.getName();
+        return name == null || name.isBlank() ? "Bluetooth headphones" : name;
+    }
+
+    String deviceAddress() {
+        return device == null ? null : device.getAddress();
+    }
+
+    private BluetoothDevice activeDevice(List<BluetoothDevice> connected) {
+        if (connected.size() == 1) return connected.get(0);
+        try {
+            Method method = BluetoothA2dp.class.getMethod("getActiveDevice");
+            BluetoothDevice active = (BluetoothDevice) invoke(method);
+            if (active != null && connected.contains(active)) return active;
+        } catch (Exception | LinkageError ignored) {
+            // A vendor build may hide this method. Never guess between outputs.
+        }
+        return null;
     }
 
     void request(BluetoothCodecConfig selected) throws Exception {

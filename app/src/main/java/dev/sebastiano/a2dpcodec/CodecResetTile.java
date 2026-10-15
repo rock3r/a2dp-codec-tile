@@ -146,6 +146,14 @@ public final class CodecResetTile extends TileService {
                     BluetoothCodecConfig.SOURCE_CODEC_TYPE_SBC);
         }
         if (intermediate == null || CodecUi.same(intermediate, target)) {
+            for (BluetoothCodecConfig choice : choices) {
+                if (!CodecUi.same(choice, target)) {
+                    intermediate = choice;
+                    break;
+                }
+            }
+        }
+        if (intermediate == null || CodecUi.same(intermediate, target)) {
             finish("No alternate codec available", false);
             return;
         }
@@ -211,7 +219,8 @@ public final class CodecResetTile extends TileService {
         boolean disconnected = CodecAccess.NO_A2DP_DEVICE.equals(message)
                 || CodecAccess.A2DP_DISCONNECTED.equals(message)
                 || CodecAccess.BLUETOOTH_OFF.equals(message);
-        if (disconnected) {
+        if (disconnected || "Needs companion association".equals(message)
+                || "Grant Bluetooth permission".equals(message)) {
             current = null;
         }
         show(message, disconnected ? Tile.STATE_UNAVAILABLE

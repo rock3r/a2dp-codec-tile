@@ -16,12 +16,14 @@ proven fix for audio stutter.
 ## Requirements
 
 - Android 17 (API 37). This is the only platform version currently targeted.
-- A paired Bluetooth A2DP audio device and an `adb` connection for initial setup.
+- A paired Bluetooth A2DP audio device.
 - To build: Android SDK Platform 37, JDK 17, and the included Gradle wrapper.
 
-The app uses the single A2DP output reported by Android. It does not target a
-particular headphone brand. If Android reports more than one connected A2DP
-output, the app stops rather than changing an arbitrary device.
+The app uses the connected A2DP output reported by Android. With multiple
+connected A2DP devices it selects Android's active output, when that can be
+identified. It stops rather than changing an arbitrary device. The available
+codec list comes from that device's current `BluetoothCodecStatus`; it is
+refreshed each time the picker opens. A headset may offer only one codec.
 
 ## Build and install
 
@@ -36,31 +38,31 @@ The debug APK is signed by your local Android debug key. No release signing key,
 signed APK, or device diagnostic is included in this repository. To distribute a
 release build, configure and protect your own signing key outside the repo.
 
-## One-time device setup
+## Set up each headset
 
 1. Pair and connect the headphones in Android Bluetooth settings.
-2. Grant the app's Bluetooth runtime permission:
+2. Add **A2DP codec** to Quick Settings. Long-press it to open the picker.
+3. Tap **Allow** if Android asks for Bluetooth access.
+4. Tap **Set up** if the picker asks for device association, and approve the
+   system prompt. Association is per headset. Repeat this step for another
+   headset when the picker asks.
 
-   ```sh
-   adb shell pm grant dev.sebastiano.a2dpcodec android.permission.BLUETOOTH_CONNECT
-   ```
+On some builds, Companion Device Manager may not discover an already-paired
+headset. In that case, the developer setup via `adb` is:
 
-3. Find the paired headphones' Bluetooth address from the phone's Bluetooth
-   diagnostics (for example, inspect `adb shell dumpsys bluetooth_manager`
-   around the device name). Use **that device's address**, not the phone's.
-4. Associate the app with that device. Replace the example address with the
-   actual one; `0` is the Android user ID for a typical single-user phone:
+```sh
+adb shell pm grant dev.sebastiano.a2dpcodec android.permission.BLUETOOTH_CONNECT
+adb shell cmd companiondevice associate 0 dev.sebastiano.a2dpcodec AA:BB:CC:DD:EE:FF
+```
 
-   ```sh
-   adb shell cmd companiondevice associate 0 dev.sebastiano.a2dpcodec AA:BB:CC:DD:EE:FF
-   ```
-
-5. Expand Quick Settings, tap **Edit**, and add **A2DP codec**.
+Replace the example address with the headset's Bluetooth address from the
+phone's Bluetooth diagnostics, such as `adb shell dumpsys bluetooth_manager`.
+Use the headset address, not the phone's. `0` is the Android user ID for a
+typical single-user phone. Check `adb shell cmd companiondevice help` if your
+device's command syntax differs.
 
 The association and permission are tied to this package. Repeat setup after
-uninstalling the app or changing its application ID. If your device's
-`companiondevice` shell command differs, check
-`adb shell cmd companiondevice help` for its syntax.
+uninstalling the app or changing its application ID.
 
 ## Use
 
@@ -68,8 +70,9 @@ uninstalling the app or changing its application ID. If your device's
 - Tap to request an alternate selectable codec, wait for Android to report it,
   then request the original codec again. The tile reports whether both steps
   were confirmed.
-- Long-press to open the codec picker. Only codecs Android reports as selectable
-  are shown. Select one and tap **Use codec**.
+- Long-press to open the codec picker. It names the active headset and shows
+  only the codecs Android currently reports as selectable for that headset.
+  Select one and tap **Use codec**.
 - With Bluetooth off or no A2DP device connected, a refreshed tile is disabled.
 
 The tile reflects the state when Android starts or refreshes its service.
@@ -77,6 +80,9 @@ SystemUI may temporarily show a cached icon after a connection changes; the
 unavailable state has not yet been visually verified during a disconnect.
 
 ## Compatibility and privacy
+
+The tile controls classic Bluetooth A2DP. An LE Audio-only connection has no
+A2DP codec for this app to show or change.
 
 Codec status and preference calls are hidden Android APIs. A platform update
 or a different vendor build may block them even with a companion association.

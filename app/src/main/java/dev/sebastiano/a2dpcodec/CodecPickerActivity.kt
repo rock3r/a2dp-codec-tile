@@ -1,7 +1,13 @@
 package dev.sebastiano.a2dpcodec
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.bluetooth.BluetoothCodecConfig
 import android.bluetooth.BluetoothCodecStatus
+import android.companion.AssociationRequest
+import android.companion.BluetoothDeviceFilter
+import android.companion.CompanionDeviceManager
+import android.content.IntentSender
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -12,6 +18,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.view.WindowCompat
+import androidx.core.content.ContextCompat
 
 /** The Quick Settings long-press destination; only connected-device codecs appear. */
 class CodecPickerActivity : ComponentActivity() {
@@ -64,6 +73,21 @@ class CodecPickerActivity : ComponentActivity() {
     private var switching by mutableStateOf(false)
     private var error by mutableStateOf<String?>(null)
     private var feedback by mutableStateOf<String?>(null)
+    private var deviceName by mutableStateOf<String?>(null)
+    private var deviceAddress: String? = null
+    private var permissionNeeded by mutableStateOf(false)
+    private var associationNeeded by mutableStateOf(false)
+    private val permissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) connect() else showError("Bluetooth access is required")
+    }
+    private val associationConfirmation = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == RESULT_OK) connect()
+        else showError("Device association was cancelled")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,8 +125,24 @@ class CodecPickerActivity : ComponentActivity() {
 
     private fun connect() {
         access?.close()
+        access = null
+        deviceName = null
+        deviceAddress = null
+        loading = true
+        error = null
+        permissionNeeded = false
+        associationNeeded = false
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionNeeded = true
+            showError("Allow Bluetooth access to read the connected headphones")
+            return
+        }
         access = CodecAccess(this, object : CodecAccess.Callback {
             override fun onReady(ready: CodecAccess) {
+                deviceName = ready.deviceName()
+                deviceAddress = ready.deviceAddress()
                 try {
                     val status = ready.status()
                     if (status?.codecConfig == null) {
@@ -112,7 +152,8 @@ class CodecPickerActivity : ComponentActivity() {
                     }
                 } catch (failure: Throwable) {
                     Log.e(TAG, "Codec list failed", failure)
-                    showError(if (failure is SecurityException) "Needs companion association"
+                    associationNeeded = failure is SecurityException
+                    showError(if (associationNeeded) "Allow codec access for ${deviceName ?: "this device"}"
                         else "Could not load codecs")
                 }
             }
@@ -131,6 +172,42 @@ class CodecPickerActivity : ComponentActivity() {
         selectedIndex = choices.indexOfFirst { CodecUi.same(it, current) }
         loading = false
         if (choices.isEmpty()) showError("No selectable codecs reported")
+    }
+
+    private fun associateDevice() {
+        val address = deviceAddress ?: run {
+            showError("Reconnect the headphones and try again")
+            return
+        }
+        val manager = getSystemService(CompanionDeviceManager::class.java) ?: run {
+            showError("Companion device setup is unavailable")
+            return
+        }
+        try {
+            loading = true
+            error = null
+            val filter = BluetoothDeviceFilter.Builder().setAddress(address).build()
+            val request = AssociationRequest.Builder()
+                .addDeviceFilter(filter)
+                .setSingleDevice(true)
+                .build()
+            manager.associate(request, mainExecutor, object : CompanionDeviceManager.Callback() {
+                override fun onAssociationPending(intentSender: IntentSender) {
+                    if (!isFinishing && !isDestroyed) {
+                        associationConfirmation.launch(IntentSenderRequest.Builder(intentSender).build())
+                    }
+                }
+
+                override fun onFailure(error: CharSequence?) {
+                    if (!isFinishing && !isDestroyed) {
+                        showError(error?.toString() ?: "Could not associate headphones")
+                    }
+                }
+            })
+        } catch (failure: Throwable) {
+            Log.e(TAG, "Association failed", failure)
+            showError("Could not start device association")
+        }
     }
 
     private fun showError(message: String) {
@@ -189,7 +266,7 @@ class CodecPickerActivity : ComponentActivity() {
         BackHandler(enabled = switching) { /* Wait for the brief codec negotiation. */ }
         AlertDialog(
             onDismissRequest = { if (!switching) finish() },
-            title = { Text("A2DP codec") },
+            title = { Text(deviceName?.let { "$it codec" } ?: "A2DP codec") },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     when {
@@ -203,7 +280,12 @@ class CodecPickerActivity : ComponentActivity() {
                                 Text("Checking codecs…", modifier = Modifier.padding(start = 16.dp))
                             }
                         }
-                        error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
+                        error != null -> Text(
+                            error!!,
+                            color = if (permissionNeeded || associationNeeded)
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.error,
+                        )
                         else -> {
                             Text(
                                 text = "Currently using ${CodecUi.name(current)}",
@@ -259,7 +341,15 @@ class CodecPickerActivity : ComponentActivity() {
                 }
             },
             confirmButton = {
-                if (!loading && error == null) {
+                if (!loading && permissionNeeded) {
+                    Button(onClick = { permissionRequest.launch(Manifest.permission.BLUETOOTH_CONNECT) }) {
+                        Text("Allow")
+                    }
+                } else if (!loading && associationNeeded) {
+                    Button(onClick = ::associateDevice) {
+                        Text("Set up")
+                    }
+                } else if (!loading && error == null) {
                     Button(
                         onClick = ::applySelection,
                         enabled = selectedIndex >= 0 && !switching,
